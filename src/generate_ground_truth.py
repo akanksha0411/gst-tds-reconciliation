@@ -4,11 +4,12 @@ import random
 import string
 from datetime import date, timedelta
 
-# random.seed(69)
-# np.random.seed(69)
+random.seed(69)
+np.random.seed(69)
 
 N_VENDORS = 20
 STATE_CODES = ["07", "27", "29", "33", "06", "24", "09", "19"]
+TOTAL_INVOICES = 1000
 fy_start = date(2025, 4, 1)
 fy_end = date(2026, 3, 31)
 
@@ -54,14 +55,34 @@ def random_invoice_dates(fy_start: date, fy_end: date) -> date:
     days_ = (fy_end - fy_start).days
     return fy_start + timedelta(days = random.randint(0, days_))
 
+def allocate_invoice_counts(n_vendors: int, total:int, low: int, high: int) -> list[int]:
+    """
+    Assigns each vendor a count between (low, high), then scales the counts so 
+    that the total always = sum(counts). Here, we are keeping things close to a 
+    1000, with each vendor getting 40-60 invoices.
+    """
+    counts = [random.randint(low, high) for _ in range(n_vendors)]
+    diff = total - sum(counts)
+    while diff !=0:
+        random_vendor_cnt_index = random.randint(0, len(counts)-1)
+        # Number of invoices generated is less than total (here, 1000)
+        if diff > 0:
+            counts[random_vendor_cnt_index] += 1
+            diff -= 1
+        elif diff < 0:
+            counts[random_vendor_cnt_index] -= 1
+            diff += 1
+    return counts
 
-def create_invoices(vendors: pd.Series, low, high) -> pd.DataFrame:
+
+def create_invoices(vendors: pd.Series) -> pd.DataFrame:
+    counts = allocate_invoice_counts(len(vendors), total = TOTAL_INVOICES, low = 40, high = 60)
     invoices = []
     invoice_cnt = 1
     buyer_state_code = "07"
-    for i in vendors:
-        vendor_gstin = i
-        for j in range(random.randint(low, high)):
+    for gstin, count in zip(vendors, counts):
+        vendor_gstin = gstin
+        for j in range(count):
             invoice_id = f"INV{invoice_cnt:05d}"
             invoice_date = random_invoice_dates(fy_start, fy_end)
             filing_period = f"{invoice_date.month:02d}-{invoice_date.year}"
@@ -98,4 +119,14 @@ def create_invoices(vendors: pd.Series, low, high) -> pd.DataFrame:
 
 if __name__ == "__main__":
     vendors = create_vendors(N_VENDORS)
-    print(create_invoices(vendors["vendor_gstin"], 40, 60))
+    ground_truth = create_invoices(vendors["vendor_gstin"])
+    assert len(ground_truth) == TOTAL_INVOICES, f"Expected {TOTAL_INVOICES}, got {len(ground_truth)}"
+
+    vendors.to_csv("data/vendors.csv", index=False)
+    ground_truth.to_csv("data/ground_truth.csv", index=False)
+
+    print(f"Generated {len(ground_truth)} ground-truth invoices across {len(vendors)} vendors")
+    print("\nInvoices per vendor:")
+    print(ground_truth.groupby("vendor_gstin").size().sort_values(ascending=False))
+    print("\nSample rows:")
+    print(ground_truth.head())
